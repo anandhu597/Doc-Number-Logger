@@ -11,6 +11,14 @@
 
     <div id="camera-section">
       <h2>Camera</h2>
+      <!-- A <video> element (needs autoplay and playsinline attributes to work right) -->
+      <video autoplay playsinline id="video"></video>
+
+      <button id="startCamBtn">Start Camera</button>
+      <button id="captureBtn">Capture</button>
+      <canvas id="canvas"></canvas>
+      <img src="" alt="" id="img" />
+
       <!-- Stage 1 will add video/canvas/buttons here -->
     </div>
 
@@ -23,7 +31,6 @@
       <h2>Log</h2>
       <!-- Stage 5 will add the results table here -->
     </div>
-
     <script type="module" src="app.js"></script>
   </body>
 </html>
