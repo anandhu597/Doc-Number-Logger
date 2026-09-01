@@ -12,20 +12,30 @@ const startCamBtn = document.getElementById("startCamBtn");
 const captureBtn = document.getElementById("captureBtn");
 const canvas = document.getElementById("canvas");
 const img = document.getElementById("img");
+const errorElement = document.getElementById("errorMsg");
 
-// console.log({ video, startCamBtn, captureBtn, canvas, img });
+let currentStream = null;
 
-startCamBtn.addEventListener("click", () => {
-  navigator.mediaDevices
-    .getUserMedia({ video: true, audio: false })
-    .then((stream) => {
-      // 2. Set the video source to the camera stream
-      videoElement.srcObject = stream;
-    })
-    .catch((error) => {
-      // 3. Handle errors (e.g., user denied permission)
-      console.error("Camera access error:", error);
+startCamBtn.addEventListener("click", async () => {
+  try {
+    // 1. If a stream is already active, stop it before opening a new one
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+    }
+
+    // 2. Await the stream directly (no .then needed)
+    currentStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false,
     });
+
+    // 3. Attach the stream to the video element
+    videoElement.srcObject = currentStream;
+    errorElement.textContent = ""; // Clear old errors if successful
+  } catch (error) {
+    console.error("Camera access error:", error);
+    errorElement.textContent = `Camera access error: ${error.message}`;
+  }
 });
 
 //------just to check
@@ -45,9 +55,12 @@ if (isMobileDevice) {
 videoElement.addEventListener("loadedmetadata", () => {
   console.log("Video width:", videoElement.videoWidth);
   console.log("Video height:", videoElement.videoHeight);
-  console.log("Video duration:", videoElement.duration, "seconds");
+
   canvas.width = videoElement.videoWidth;
   canvas.height = videoElement.videoHeight;
+
+  // Enable the capture button once dimensions are ready
+  captureBtn.disabled = false;
 });
 
 captureBtn.addEventListener("click", () => {
