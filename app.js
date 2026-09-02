@@ -14,6 +14,10 @@ const canvas = document.getElementById("canvas");
 const img = document.getElementById("img");
 const errorElement = document.getElementById("errorMsg");
 
+const processedImgEl = document.getElementById("processedImg");
+
+const enhanceOcrEl = document.getElementById("enhanceOcr");
+
 let currentStream = null;
 
 startCamBtn.addEventListener("click", async () => {
@@ -63,6 +67,7 @@ videoElement.addEventListener("loadedmetadata", () => {
   captureBtn.disabled = false;
 });
 
+let imagDataArr = null;
 captureBtn.addEventListener("click", () => {
   console.log("capture Clicked");
   const context = canvas.getContext("2d");
@@ -70,9 +75,43 @@ captureBtn.addEventListener("click", () => {
   console.log(context);
 
   context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  const imagData = context.getImageData(0, 0, canvas.width, canvas.height);
 
   const imageUrl = canvas.toDataURL("image/png");
-  //   console.log(imgeUrl);
+
+  console.log(imagData);
+  console.log(imagData.data);
+
+  imagDataArr = imagData.data;
+  if (enhanceOcrEl.checked) {
+    applyGrayScale(imagDataArr, context, imagData);
+    processedImgEl.src = canvas.toDataURL("image/png");
+  }
 
   img.src = imageUrl;
 });
+
+function applyGrayScale(data, context, imageData) {
+  // 2. Loop through every pixel (step size of 4)
+  for (let i = 0; i < data.length; i += 4) {
+    const red = data[i];
+    const green = data[i + 1];
+    const blue = data[i + 2];
+
+    // 3. Grayscale calculation (Luminance formula)
+    const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
+
+    // 4. Thresholding (Binarization cutoff)
+    const threshold = 128;
+    const value = gray > threshold ? 255 : 0; // Pure White (255) or Pure Black (0)
+
+    // 5. Overwrite the RGB channels with the binary value
+    data[i] = value; // Red
+    data[i + 1] = value; // Green
+    data[i + 2] = value; // Blue
+    // data[i + 3] remains untouched (Alpha / Opacity)
+  }
+
+  // 6. Write modified array back to the canvas
+  context.putImageData(imageData, 0, 0);
+}
