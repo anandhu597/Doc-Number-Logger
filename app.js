@@ -20,27 +20,34 @@ const enhanceOcrEl = document.getElementById("enhanceOcr");
 
 let currentStream = null;
 
-startCamBtn.addEventListener("click", async () => {
-  try {
-    // 1. If a stream is already active, stop it before opening a new one
-    if (currentStream) {
-      currentStream.getTracks().forEach((track) => track.stop());
-    }
+let currentFacingMode = "environment";
 
-    // 2. Await the stream directly (no .then needed)
-    currentStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: false,
-    });
+const switchCamEl = document.getElementById("switchCam");
+console.log(switchCamEl);
 
-    // 3. Attach the stream to the video element
-    videoElement.srcObject = currentStream;
-    errorElement.textContent = ""; // Clear old errors if successful
-  } catch (error) {
-    console.error("Camera access error:", error);
-    errorElement.textContent = `Camera access error: ${error.message}`;
-  }
-});
+// startCamBtn.addEventListener("click", async () => {
+//   try {
+//     // 1. If a stream is already active, stop it before opening a new one
+//     if (currentStream) {
+//       currentStream.getTracks().forEach((track) => track.stop());
+//     }
+
+//     // 2. Await the stream directly (no .then needed)
+//     currentStream = await navigator.mediaDevices.getUserMedia({
+//       video: { facingMode: currentFacingMode },
+//       audio: false,
+//     });
+
+//     // 3. Attach the stream to the video element
+//     videoElement.srcObject = currentStream;
+//     errorElement.textContent = ""; // Clear old errors if successful
+//   } catch (error) {
+//     console.error("Camera access error:", error);
+//     errorElement.textContent = `Camera access error: ${error.message}`;
+//   }
+// });
+
+startCamBtn.addEventListener("click", startCamera);
 
 //------just to check
 
@@ -90,6 +97,37 @@ captureBtn.addEventListener("click", () => {
 
   img.src = imageUrl;
 });
+
+switchCamEl.addEventListener("click", async () => {
+  console.log(currentFacingMode);
+
+  currentFacingMode =
+    currentFacingMode === "environment" ? "user" : "environment";
+
+  await startCamera();
+});
+
+async function startCamera() {
+  try {
+    // 1. If a stream is already active, stop it before opening a new one
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+    }
+
+    // 2. Await the stream directly (no .then needed)
+    currentStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: currentFacingMode },
+      audio: false,
+    });
+
+    // 3. Attach the stream to the video element
+    videoElement.srcObject = currentStream;
+    errorElement.textContent = ""; // Clear old errors if successful
+  } catch (error) {
+    console.error("Camera access error:", error);
+    errorElement.textContent = `Camera access error: ${error.message}`;
+  }
+}
 
 function applyGrayScale(data, context, imageData) {
   // 2. Loop through every pixel (step size of 4)
