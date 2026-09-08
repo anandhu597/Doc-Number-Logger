@@ -23,29 +23,10 @@ let currentStream = null;
 let currentFacingMode = "environment";
 
 const switchCamEl = document.getElementById("switchCam");
-console.log(switchCamEl);
 
-// startCamBtn.addEventListener("click", async () => {
-//   try {
-//     // 1. If a stream is already active, stop it before opening a new one
-//     if (currentStream) {
-//       currentStream.getTracks().forEach((track) => track.stop());
-//     }
-
-//     // 2. Await the stream directly (no .then needed)
-//     currentStream = await navigator.mediaDevices.getUserMedia({
-//       video: { facingMode: currentFacingMode },
-//       audio: false,
-//     });
-
-//     // 3. Attach the stream to the video element
-//     videoElement.srcObject = currentStream;
-//     errorElement.textContent = ""; // Clear old errors if successful
-//   } catch (error) {
-//     console.error("Camera access error:", error);
-//     errorElement.textContent = `Camera access error: ${error.message}`;
-//   }
-// });
+const scanBtn = document.getElementById("scanBtn");
+const ocrStatusEl = document.getElementById("ocrStatus");
+const ocrOutputEl = document.getElementById("ocrOutput");
 
 startCamBtn.addEventListener("click", startCamera);
 
@@ -106,6 +87,26 @@ switchCamEl.addEventListener("click", async () => {
 
   await startCamera();
 });
+
+//---------------------------Scan Documents---------------------
+scanBtn.addEventListener("click", async () => {
+  ocrStatusEl.textContent = "Loading OCR engine…";
+  scanBtn.disabled = true;
+  try {
+    const result = await Tesseract.recognize(canvas, "eng");
+    const text = result.data.text;
+    ocrOutputEl.textContent = text;
+    ocrStatusEl.textContent = "Done!";
+    console.log(result); // now this works
+  } catch (error) {
+    console.error("OCR error:", error);
+    ocrStatusEl.textContent = "Scan failed — please retry.";
+  } finally {
+    scanBtn.disabled = false;
+  }
+});
+
+//++++++++++++++++++ Helper Functions +++++++++++++++++++++++
 
 async function startCamera() {
   try {

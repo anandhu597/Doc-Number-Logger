@@ -29,13 +29,23 @@
 
     <div id="preview-section">
       <h2>Preview</h2>
-      <!-- Stage 1/2 will add captured image + crop UI here -->
+      <!-- Captured image display -->
+
+      <!-- Add your Scan / Run OCR trigger button here -->
+      <button id="scanBtn">Scan Document</button>
+
+      <!-- Add a loading status indicator for Stage 3 feedback -->
+      <p id="ocrStatus"></p>
+
+      <!-- Stage 3: Raw text display container -->
+      <pre id="ocrOutput"></pre>
     </div>
 
     <div id="log-section">
       <h2>Log</h2>
       <!-- Stage 5 will add the results table here -->
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
