@@ -1,11 +1,16 @@
-// Stage 0: just confirming the module loads and the DOM is ready.
+// ============================================================
+// Stage 0: Confirming the module loads and the DOM is ready
+// ============================================================
+
 console.log("app.js loaded");
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log("DOM ready — scaffolding in place");
 });
 
-//_______________references____________________
+// ============================================================
+// References
+// ============================================================
 
 const videoElement = document.getElementById("video");
 const startCamBtn = document.getElementById("startCamBtn");
@@ -15,12 +20,7 @@ const img = document.getElementById("img");
 const errorElement = document.getElementById("errorMsg");
 
 const processedImgEl = document.getElementById("processedImg");
-
 const enhanceOcrEl = document.getElementById("enhanceOcr");
-
-let currentStream = null;
-
-let currentFacingMode = "environment";
 
 const switchCamEl = document.getElementById("switchCam");
 
@@ -28,11 +28,25 @@ const scanBtn = document.getElementById("scanBtn");
 const ocrStatusEl = document.getElementById("ocrStatus");
 const ocrOutputEl = document.getElementById("ocrOutput");
 
-startCamBtn.addEventListener("click", startCamera);
+// ============================================================
+// State Variables
+// ============================================================
+
+let currentStream = null;
+let currentFacingMode = "environment";
+
+let hasCaptured = false;
+
+let imagDataArr = null;
+
+// ============================================================
+// Device Detection
+// ============================================================
 
 //------just to check
 
 const userAgent = navigator.userAgent;
+
 const isMobileDevice =
   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     userAgent,
@@ -43,6 +57,16 @@ if (isMobileDevice) {
 } else {
   console.log("Laptop or Desktop");
 }
+
+// ============================================================
+// Event Listeners
+// ============================================================
+
+// Start Camera
+
+startCamBtn.addEventListener("click", startCamera);
+
+// Video Metadata
 
 videoElement.addEventListener("loadedmetadata", () => {
   console.log("Video width:", videoElement.videoWidth);
@@ -55,14 +79,17 @@ videoElement.addEventListener("loadedmetadata", () => {
   captureBtn.disabled = false;
 });
 
-let imagDataArr = null;
+// Capture Button
+
 captureBtn.addEventListener("click", () => {
   console.log("capture Clicked");
+
   const context = canvas.getContext("2d");
 
   console.log(context);
 
   context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
   const imagData = context.getImageData(0, 0, canvas.width, canvas.height);
 
   const imageUrl = canvas.toDataURL("image/png");
@@ -71,13 +98,19 @@ captureBtn.addEventListener("click", () => {
   console.log(imagData.data);
 
   imagDataArr = imagData.data;
+
   if (enhanceOcrEl.checked) {
     applyGrayScale(imagDataArr, context, imagData);
     processedImgEl.src = canvas.toDataURL("image/png");
   }
 
   img.src = imageUrl;
+
+  hasCaptured = true;
+  scanBtn.disabled = false;
 });
+
+// Switch Camera
 
 switchCamEl.addEventListener("click", async () => {
   console.log(currentFacingMode);
@@ -88,15 +121,22 @@ switchCamEl.addEventListener("click", async () => {
   await startCamera();
 });
 
-//---------------------------Scan Documents---------------------
+// ============================================================
+// Scan Documents / OCR
+// ============================================================
+
 scanBtn.addEventListener("click", async () => {
   ocrStatusEl.textContent = "Loading OCR engine…";
   scanBtn.disabled = true;
+
   try {
     const result = await Tesseract.recognize(canvas, "eng");
+
     const text = result.data.text;
+
     ocrOutputEl.textContent = text;
     ocrStatusEl.textContent = "Done!";
+
     console.log(result); // now this works
   } catch (error) {
     console.error("OCR error:", error);
@@ -106,7 +146,9 @@ scanBtn.addEventListener("click", async () => {
   }
 });
 
-//++++++++++++++++++ Helper Functions +++++++++++++++++++++++
+// ============================================================
+// Helper Functions
+// ============================================================
 
 async function startCamera() {
   try {
@@ -148,6 +190,7 @@ function applyGrayScale(data, context, imageData) {
     data[i] = value; // Red
     data[i + 1] = value; // Green
     data[i + 2] = value; // Blue
+
     // data[i + 3] remains untouched (Alpha / Opacity)
   }
 
