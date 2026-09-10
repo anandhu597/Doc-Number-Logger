@@ -28,6 +28,8 @@ const scanBtn = document.getElementById("scanBtn");
 const ocrStatusEl = document.getElementById("ocrStatus");
 const ocrOutputEl = document.getElementById("ocrOutput");
 
+const guideFrame = document.getElementById("guide-frame");
+
 // ============================================================
 // State Variables
 // ============================================================
@@ -84,28 +86,50 @@ videoElement.addEventListener("loadedmetadata", () => {
 captureBtn.addEventListener("click", () => {
   console.log("capture Clicked");
 
+  // 1. Calculate crop region from guide frame position
+  const guideRect = guideFrame.getBoundingClientRect();
+  const videoRect = videoElement.getBoundingClientRect();
+
+  const relativeX = guideRect.left - videoRect.left;
+  const relativeY = guideRect.top - videoRect.top;
+
+  const scaleX = videoElement.videoWidth / videoRect.width;
+  const scaleY = videoElement.videoHeight / videoRect.height;
+
+  const sourceX = relativeX * scaleX;
+  const sourceY = relativeY * scaleY;
+  const sourceWidth = guideRect.width * scaleX;
+  const sourceHeight = guideRect.height * scaleY;
+
+  // 2. Resize canvas to match the CROPPED region, not the full video
+  canvas.width = sourceWidth;
+  canvas.height = sourceHeight;
+
   const context = canvas.getContext("2d");
 
-  console.log(context);
-
-  context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  // 3. Draw ONLY the cropped source region onto the canvas
+  context.drawImage(
+    videoElement,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight, // source: crop area
+    0,
+    0,
+    canvas.width,
+    canvas.height, // destination: fills canvas
+  );
 
   const imagData = context.getImageData(0, 0, canvas.width, canvas.height);
-
   const imageUrl = canvas.toDataURL("image/png");
 
-  console.log(imagData);
-  console.log(imagData.data);
-
   imagDataArr = imagData.data;
-
   if (enhanceOcrEl.checked) {
     applyGrayScale(imagDataArr, context, imagData);
     processedImgEl.src = canvas.toDataURL("image/png");
   }
 
   img.src = imageUrl;
-
   hasCaptured = true;
   scanBtn.disabled = false;
 });
@@ -121,6 +145,31 @@ switchCamEl.addEventListener("click", async () => {
   await startCamera();
 });
 
+// ============================================================
+// Get Bounding Rectangles
+// ============================================================
+
+captureBtn.addEventListener("click", () => {
+  // 1. Ensure elements are available when clicked
+  const guideRect = guideFrame.getBoundingClientRect();
+  const videoRect = videoElement.getBoundingClientRect();
+
+  // 2. Calculate relative offsets
+  const relativeX = guideRect.left - videoRect.left;
+  const relativeY = guideRect.top - videoRect.top;
+
+  // 3. Calculate scales
+  const scaleX = videoElement.videoWidth / videoRect.width;
+  const scaleY = videoElement.videoHeight / videoRect.height;
+
+  // 4. Source crop coordinates
+  const sourceX = relativeX * scaleX;
+  const sourceY = relativeY * scaleY;
+  const sourceWidth = guideRect.width * scaleX;
+  const sourceHeight = guideRect.height * scaleY;
+
+  console.log({ sourceX, sourceY, sourceWidth, sourceHeight });
+});
 // ============================================================
 // Scan Documents / OCR
 // ============================================================
