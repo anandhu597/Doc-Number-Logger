@@ -29,6 +29,7 @@ const ocrStatusEl = document.getElementById("ocrStatus");
 const ocrOutputEl = document.getElementById("ocrOutput");
 
 const guideFrame = document.getElementById("guide-frame");
+const docNumberResultEl = document.getElementById("docNumberResult");
 
 // ============================================================
 // State Variables
@@ -149,29 +150,35 @@ switchCamEl.addEventListener("click", async () => {
 // Get Bounding Rectangles
 // ============================================================
 
-captureBtn.addEventListener("click", () => {
-  // 1. Ensure elements are available when clicked
-  const guideRect = guideFrame.getBoundingClientRect();
-  const videoRect = videoElement.getBoundingClientRect();
-
-  // 2. Calculate relative offsets
-  const relativeX = guideRect.left - videoRect.left;
-  const relativeY = guideRect.top - videoRect.top;
-
-  // 3. Calculate scales
-  const scaleX = videoElement.videoWidth / videoRect.width;
-  const scaleY = videoElement.videoHeight / videoRect.height;
-
-  // 4. Source crop coordinates
-  const sourceX = relativeX * scaleX;
-  const sourceY = relativeY * scaleY;
-  const sourceWidth = guideRect.width * scaleX;
-  const sourceHeight = guideRect.height * scaleY;
-
-  console.log({ sourceX, sourceY, sourceWidth, sourceHeight });
-});
 // ============================================================
-// Scan Documents / OCR
+const realDocTestCases = [
+  {
+    name: "Cash Receipt Voucher",
+    input: "5040-003024 CR 5040-CSH-RV-000032 Staff Members Sales",
+    expected: "5040-CSH-RV-000032",
+  },
+  {
+    name: "Debit Note / AP Document",
+    input: "5040-004933 AP_DBN 5040-AP-CML-DN-00344 OTHER LOCAL SUPPLIERS",
+    expected: "5040-AP-CML-DN-00344",
+  },
+  {
+    name: "General Journal Voucher (Live OCR Scan Sample)",
+    input: "5040-004442 GV 5040-GEN-JV-000834",
+    expected: "5040-GEN-JV-000834",
+  },
+  {
+    name: "OCR Character Swap Noise ('O' instead of '0')",
+    input: "5O40-GEN-JV-OOO834",
+    expected: "5040-GEN-JV-000834",
+  },
+  {
+    name: "Embedded Invoice/PO Reference Text",
+    input:
+      "CREDIT NOTE TO BE ISSUED TDN#2217 PO#5040-PO-000667 INV#5040-AP-INV-000710",
+    expected: "5040-AP-INV-000710",
+  },
+];
 // ============================================================
 
 scanBtn.addEventListener("click", async () => {
@@ -181,12 +188,35 @@ scanBtn.addEventListener("click", async () => {
   try {
     const result = await Tesseract.recognize(canvas, "eng");
 
-    const text = result.data.text;
+    // const text = result.data.text;
+    // extractDocNumber(text);
+
+    //____________________For test only------------------
+    let text = "";
+    // text = realDocTestCases[0].input;
+    // text = realDocTestCases[1].input;
+
+    // text = realDocTestCases[2].input;
+    // text = realDocTestCases[3].input;
+
+    extractDocNumber(text);
+
+    //____________________y------------------
 
     ocrOutputEl.textContent = text;
     ocrStatusEl.textContent = "Done!";
 
-    console.log(result); // now this works
+    // Step 3 & 4: Run pure extraction function and handle UI explicitly[cite: 1]
+    const extractedNumber = extractDocNumber(text);
+
+    if (extractedNumber) {
+      docNumberResultEl.style.color = "green";
+      docNumberResultEl.textContent = extractedNumber; // Success state[cite: 1]
+    } else {
+      docNumberResultEl.style.color = "red";
+      docNumberResultEl.textContent =
+        "No document number detected — please retry"; // Explicit fail state[cite: 1, 2]
+    }
   } catch (error) {
     console.error("OCR error:", error);
     ocrStatusEl.textContent = "Scan failed — please retry.";
@@ -246,3 +276,23 @@ function applyGrayScale(data, context, imageData) {
   // 6. Write modified array back to the canvas
   context.putImageData(imageData, 0, 0);
 }
+
+function extractDocNumber(rawText) {
+  // Added the 'i' flag at the end
+  const docPattern = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/i;
+
+  const match = rawText.match(docPattern);
+  console.log("Matched Document Number:", match ? match[0] : "No match found");
+
+  return match ? match[0] : null;
+}
+
+//----------------------Test Area---------------------------
+
+const regExp = /\d{4}/;
+const regExp2 = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/;
+
+const sampleletter = "Document Ref: 2026-DXB-UAE-123456 Approved";
+
+console.log(sampleletter.match(regExp));
+console.log(sampleletter.match(regExp2)?.[0]);

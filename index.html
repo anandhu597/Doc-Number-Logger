@@ -41,13 +41,25 @@
       <!-- Captured image display -->
 
       <!-- Add your Scan / Run OCR trigger button here -->
-      <button id="scanBtn" disabled>Scan Document</button>
+      <!-- <button id="scanBtn" disabled>Scan Document</button> -->
+            <button id="scanBtn" >Scan Document</button>
+
 
       <!-- Add a loading status indicator for Stage 3 feedback -->
       <p id="ocrStatus"></p>
 
       <!-- Stage 3: Raw text display container -->
       <pre id="ocrOutput"></pre>
+    </div>
+
+
+    <!-- Stage 4: Dedicated extraction result display -->
+      <div id="docNumberContainer" style="margin-top: 10px;">
+        <strong>Extracted Document Number:</strong>
+        <p id="docNumberResult" style="font-weight: bold; font-size: 1.1em; color: #333;">
+          Waiting for scan…
+        </p>
+      </div>
     </div>
 
     <div id="log-section">
