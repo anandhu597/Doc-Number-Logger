@@ -1,39 +1,37 @@
-// ============================================================
-// Stage 0: Confirming the module loads and the DOM is ready
-// ============================================================
+/* ============================================================
+   STAGE 1: DOM REFERENCES
+   ============================================================ */
 
-console.log("app.js loaded");
-
-document.addEventListener("DOMContentLoaded", () => {
-  console.log("DOM ready — scaffolding in place");
-});
-
-// ============================================================
-// References
-// ============================================================
-
+// Camera elements
 const videoElement = document.getElementById("video");
 const startCamBtn = document.getElementById("startCamBtn");
 const captureBtn = document.getElementById("captureBtn");
+const switchCamEl = document.getElementById("switchCam");
+
+// Canvas and image elements
 const canvas = document.getElementById("canvas");
 const img = document.getElementById("img");
-const errorElement = document.getElementById("errorMsg");
-
 const processedImgEl = document.getElementById("processedImg");
 const enhanceOcrEl = document.getElementById("enhanceOcr");
 
-const switchCamEl = document.getElementById("switchCam");
-
+// Error and OCR elements
+const errorElement = document.getElementById("errorMsg");
 const scanBtn = document.getElementById("scanBtn");
 const ocrStatusEl = document.getElementById("ocrStatus");
 const ocrOutputEl = document.getElementById("ocrOutput");
 
+// Document elements
 const guideFrame = document.getElementById("guide-frame");
 const docNumberResultEl = document.getElementById("docNumberResult");
 
-// ============================================================
-// State Variables
-// ============================================================
+// Logging elements
+const logSectionEl = document.getElementById("tableArea");
+const inputEl = document.getElementById("input");
+const confirmLogBtn = document.getElementById("confirm-log-btn");
+
+/* ============================================================
+   STAGE 2: STATE VARIABLES
+   ============================================================ */
 
 let currentStream = null;
 let currentFacingMode = "environment";
@@ -42,9 +40,12 @@ let hasCaptured = false;
 
 let imagDataArr = null;
 
-// ============================================================
-// Device Detection
-// ============================================================
+// Local document log
+const scanLog = [];
+
+/* ============================================================
+   STAGE 3: DEVICE DETECTION
+   ============================================================ */
 
 //------just to check
 
@@ -61,9 +62,9 @@ if (isMobileDevice) {
   console.log("Laptop or Desktop");
 }
 
-// ============================================================
-// Event Listeners
-// ============================================================
+/* ============================================================
+   STAGE 4: EVENT LISTENERS
+   ============================================================ */
 
 // Start Camera
 
@@ -125,6 +126,7 @@ captureBtn.addEventListener("click", () => {
   const imageUrl = canvas.toDataURL("image/png");
 
   imagDataArr = imagData.data;
+
   if (enhanceOcrEl.checked) {
     applyGrayScale(imagDataArr, context, imagData);
     processedImgEl.src = canvas.toDataURL("image/png");
@@ -146,11 +148,214 @@ switchCamEl.addEventListener("click", async () => {
   await startCamera();
 });
 
-// ============================================================
-// Get Bounding Rectangles
-// ============================================================
+// Scan Button / OCR
 
-// ============================================================
+scanBtn.addEventListener("click", async () => {
+  ocrStatusEl.textContent = "Loading OCR engine…";
+  scanBtn.disabled = true;
+
+  try {
+    const result = await Tesseract.recognize(canvas, "eng");
+
+    const text = result.data.text;
+
+    ocrOutputEl.textContent = text;
+    ocrStatusEl.textContent = "Done!";
+
+    // Step 3 & 4: Run pure extraction function and handle UI explicitly[cite: 1]
+    const extractedNumber = extractDocNumber(text);
+    handleExtractionUI(extractedNumber);
+
+    if (extractedNumber) {
+      docNumberResultEl.style.color = "green";
+      docNumberResultEl.textContent = extractedNumber; // Success
+    } else {
+      docNumberResultEl.style.color = "red";
+      docNumberResultEl.textContent =
+        "No document number detected — please retry"; // Explicit fail state[cite: 1, 2]
+    }
+  } catch (error) {
+    console.error("OCR error:", error);
+    ocrStatusEl.textContent = "Scan failed — please retry.";
+  } finally {
+    scanBtn.disabled = false;
+  }
+});
+
+// Confirm Log Button
+
+confirmLogBtn.addEventListener("click", () => {
+  console.log("loging confirmed");
+
+  const finalValue = inputEl.value.trim();
+
+  if (!finalValue) return;
+
+  console.log(finalValue);
+  const entry = { docNumber: finalValue, timestamp: new Date().toISOString() };
+  scanLog.push(entry);
+  renderLog();
+
+  syncEntryToSheet(entry); // ← add this
+});
+
+/* ============================================================
+   STAGE 5: HELPER FUNCTIONS
+   ============================================================ */
+
+// Start Camera
+
+async function startCamera() {
+  try {
+    // 1. If a stream is already active, stop it before opening a new one
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+    }
+
+    // 2. Await the stream directly (no .then needed)
+    currentStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: currentFacingMode },
+      audio: false,
+    });
+
+    // 3. Attach the stream to the video element
+    videoElement.srcObject = currentStream;
+    errorElement.textContent = ""; // Clear old errors if successful
+  } catch (error) {
+    console.error("Camera access error:", error);
+    errorElement.textContent = `Camera access error: ${error.message}`;
+  }
+}
+
+// Apply Grayscale
+
+function applyGrayScale(data, context, imageData) {
+  // 2. Loop through every pixel (step size of 4)
+  for (let i = 0; i < data.length; i += 4) {
+    const red = data[i];
+    const green = data[i + 1];
+    const blue = data[i + 2];
+
+    // 3. Grayscale calculation (Luminance formula)
+    const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
+
+    // 4. Thresholding (Binarization cutoff)
+    const threshold = 128;
+    const value = gray > threshold ? 255 : 0; // Pure White (255) or Pure Black (0)
+
+    // 5. Overwrite the RGB channels with the binary value
+    data[i] = value; // Red
+    data[i + 1] = value; // Green
+    data[i + 2] = value; // Blue
+
+    // data[i + 3] remains untouched (Alpha / Opacity)
+  }
+
+  // 6. Write modified array back to the canvas
+  context.putImageData(imageData, 0, 0);
+}
+
+// Extract Document Number
+
+function extractDocNumber(rawText) {
+  // Added the 'i' flag at the end
+  const docPattern = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/i;
+
+  const match = rawText.match(docPattern);
+
+  console.log("Matched Document Number:", match ? match[0] : "No match found");
+
+  return match ? match[0] : null;
+}
+
+// Handle Extraction UI
+
+function handleExtractionUI(extractedNumber) {
+  console.log(extractedNumber); // Logs: "5040-GEN-JV-000834"
+
+  if (extractedNumber) {
+    // 1. Put the extracted string directly inside the input
+    inputEl.value = extractedNumber;
+  } else {
+    // 2. Clear input or handle empty case explicitly
+    inputEl.value = "";
+  }
+}
+
+// Step 3: Write the renderLog() function to display the array in a table
+
+function renderLog() {
+  logSectionEl.innerHTML = ""; // clear previous render first
+
+  if (scanLog.length === 0) {
+    const emptyMsg = document.createElement("p");
+    emptyMsg.textContent = "No documents logged yet.";
+    logSectionEl.appendChild(emptyMsg);
+    return;
+  }
+
+  // Create table element
+  const table = document.createElement("table");
+
+  table.border = "1";
+  table.style.marginTop = "10px";
+  table.style.borderCollapse = "collapse";
+
+  // Build table header
+  table.innerHTML = `
+    <thead>
+      <tr style="background-color: #f2f2f2;">
+        <th style="padding: 8px;">#</th>
+        <th style="padding: 8px;">Doc Number</th>
+        <th style="padding: 8px;">Timestamp</th>
+      </tr>
+    </thead>
+    <tbody>
+    </tbody>
+  `;
+
+  const tbody = table.querySelector("tbody");
+
+  // Populate rows
+  scanLog.forEach((entry, index) => {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td style="padding: 8px; text-align: center;">${index + 1}</td>
+      <td style="padding: 8px;">${entry.docNumber}</td>
+      <td style="padding: 8px;">${new Date(entry.timestamp).toLocaleTimeString()}</td>
+    `;
+
+    tbody.appendChild(row);
+  });
+
+  logSectionEl.appendChild(table);
+}
+//+++++++++++++++Stage 6 code++++++++++++++++++++
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbzwimRjnxJZI9uLNWvqx4gsrIzeXc4RNIeCv0sDd_V3FVcJCSTVcmAyvoDpvFPD6OwJpA/exec";
+
+async function syncEntryToSheet(entry) {
+  try {
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(entry),
+    });
+    console.log("Sync response received");
+  } catch (err) {
+    console.error("Sync failed:", err);
+  }
+}
+
+/* ============================================================
+   TEST AREA
+   ============================================================ */
+
+//----------------------Test Area---------------------------
+
+// Your original test cases remain exactly the same.
+
 const realDocTestCases = [
   {
     name: "Cash Receipt Voucher",
@@ -179,120 +384,16 @@ const realDocTestCases = [
     expected: "5040-AP-INV-000710",
   },
 ];
-// ============================================================
 
-scanBtn.addEventListener("click", async () => {
-  ocrStatusEl.textContent = "Loading OCR engine…";
-  scanBtn.disabled = true;
+//____________________For test only------------------
 
-  try {
-    const result = await Tesseract.recognize(canvas, "eng");
+// let text = "";
+// text = realDocTestCases[0].input;
+// text = realDocTestCases[1].input;
 
-    // const text = result.data.text;
-    // extractDocNumber(text);
+// text = realDocTestCases[2].input;
+// text = realDocTestCases[3].input;
 
-    //____________________For test only------------------
-    let text = "";
-    // text = realDocTestCases[0].input;
-    // text = realDocTestCases[1].input;
+// extractDocNumber(text);
 
-    // text = realDocTestCases[2].input;
-    // text = realDocTestCases[3].input;
-
-    extractDocNumber(text);
-
-    //____________________y------------------
-
-    ocrOutputEl.textContent = text;
-    ocrStatusEl.textContent = "Done!";
-
-    // Step 3 & 4: Run pure extraction function and handle UI explicitly[cite: 1]
-    const extractedNumber = extractDocNumber(text);
-
-    if (extractedNumber) {
-      docNumberResultEl.style.color = "green";
-      docNumberResultEl.textContent = extractedNumber; // Success state[cite: 1]
-    } else {
-      docNumberResultEl.style.color = "red";
-      docNumberResultEl.textContent =
-        "No document number detected — please retry"; // Explicit fail state[cite: 1, 2]
-    }
-  } catch (error) {
-    console.error("OCR error:", error);
-    ocrStatusEl.textContent = "Scan failed — please retry.";
-  } finally {
-    scanBtn.disabled = false;
-  }
-});
-
-// ============================================================
-// Helper Functions
-// ============================================================
-
-async function startCamera() {
-  try {
-    // 1. If a stream is already active, stop it before opening a new one
-    if (currentStream) {
-      currentStream.getTracks().forEach((track) => track.stop());
-    }
-
-    // 2. Await the stream directly (no .then needed)
-    currentStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: currentFacingMode },
-      audio: false,
-    });
-
-    // 3. Attach the stream to the video element
-    videoElement.srcObject = currentStream;
-    errorElement.textContent = ""; // Clear old errors if successful
-  } catch (error) {
-    console.error("Camera access error:", error);
-    errorElement.textContent = `Camera access error: ${error.message}`;
-  }
-}
-
-function applyGrayScale(data, context, imageData) {
-  // 2. Loop through every pixel (step size of 4)
-  for (let i = 0; i < data.length; i += 4) {
-    const red = data[i];
-    const green = data[i + 1];
-    const blue = data[i + 2];
-
-    // 3. Grayscale calculation (Luminance formula)
-    const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
-
-    // 4. Thresholding (Binarization cutoff)
-    const threshold = 128;
-    const value = gray > threshold ? 255 : 0; // Pure White (255) or Pure Black (0)
-
-    // 5. Overwrite the RGB channels with the binary value
-    data[i] = value; // Red
-    data[i + 1] = value; // Green
-    data[i + 2] = value; // Blue
-
-    // data[i + 3] remains untouched (Alpha / Opacity)
-  }
-
-  // 6. Write modified array back to the canvas
-  context.putImageData(imageData, 0, 0);
-}
-
-function extractDocNumber(rawText) {
-  // Added the 'i' flag at the end
-  const docPattern = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/i;
-
-  const match = rawText.match(docPattern);
-  console.log("Matched Document Number:", match ? match[0] : "No match found");
-
-  return match ? match[0] : null;
-}
-
-//----------------------Test Area---------------------------
-
-const regExp = /\d{4}/;
-const regExp2 = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/;
-
-const sampleletter = "Document Ref: 2026-DXB-UAE-123456 Approved";
-
-console.log(sampleletter.match(regExp));
-console.log(sampleletter.match(regExp2)?.[0]);
+//____________________y------------------
