@@ -479,6 +479,6 @@ const realDocTestCases = [
 // text = realDocTestCases[2].input;
 // text = realDocTestCases[3].input;
 
-extractDocNumber(text);
+// extractDocNumber(text);
 
 //____________________y------------------
