@@ -256,16 +256,80 @@ function applyGrayScale(data, context, imageData) {
 }
 
 // Extract Document Number
+const DOC_PATTERNS = [
+  // 1. Cash Receipt Voucher
+  { type: "Cash Receipt Voucher", pattern: /\d{4}-CSH-RV-\d{6}/i },
+
+  // 2. Bank Receipt Voucher
+  { type: "Bank Receipt Voucher", pattern: /\d{4}-BNK-RV-\d{6}/i },
+
+  // 3. Bank Payment Voucher
+  { type: "Bank Payment Voucher", pattern: /\d{4}-BNK-PV-\d{6}/i },
+
+  // 4. Post-Dated Cheque Voucher (AP PDC)
+  {
+    type: "Post-Dated Cheque Voucher (AP PDC)",
+    pattern: /\d{4}-PDC-PV-\d{6}/i,
+  },
+
+  // 5. Debit Note
+  { type: "Debit Note", pattern: /\d{4}-AP-CML-DN-\d{5,6}/i },
+
+  // 6. AP Tax Debit Note
+  { type: "AP Tax Debit Note", pattern: /\d{4}-AP-TAX-DN-\d{5,6}/i },
+
+  // 7. FT Commercial Debit Note
+  { type: "FT Commercial Debit Note", pattern: /\d{4}-FT-CML-DN-\d{5,6}/i },
+
+  // 8. General Journal Voucher
+  { type: "General Journal Voucher", pattern: /\d{4}-GEN-JV-\d{6}/i },
+
+  // 9. Invoice
+  { type: "Invoice", pattern: /\d{4}-AP-INV-\d{5,6}/i },
+
+  // 10. Commercial Invoice
+  { type: "Commercial Invoice", pattern: /\d{4}-CML-INV-\d{5,6}/i },
+
+  // 11. Tax Invoice
+  { type: "Tax Invoice", pattern: /\d{4}-TAX-INV-\d{5,6}/i },
+
+  // 12. Vendor Invoice
+  { type: "Vendor Invoice", pattern: /\d{4}-VNDR-INV-\d{5,6}/i },
+
+  // 13. Sales Return Tax Credit Note
+  { type: "Sales Return Tax Credit Note", pattern: /\d{4}-SRTAXCN-\d{5,6}/i },
+
+  // 14. FT Tax Credit Note
+  { type: "FT Tax Credit Note", pattern: /\d{4}-FT-TAX-CN-\d{5,6}/i },
+
+  // 15. FT Commercial Credit Note
+  { type: "FT Commercial Credit Note", pattern: /\d{4}-FT-CML-CN-\d{5,6}/i },
+
+  // 16. Purchase Order
+  { type: "Purchase Order", pattern: /\d{4}-PO-\d{5,6}/i },
+
+  // 17. Goods Received Note
+  { type: "Goods Received Note", pattern: /\d{4}-GRN-\d{5,6}/i },
+
+  // 18. Fallback Secondary (Short Numeric ID)
+  { type: "Fallback Secondary", pattern: /\d{4}-\d{6}/i },
+];
 
 function extractDocNumber(rawText) {
-  // Added the 'i' flag at the end
-  const docPattern = /\d{4}-[A-Z]+-[A-Z]+-\d{6}/i;
+  if (!rawText) return null;
 
-  const match = rawText.match(docPattern);
+  for (const { type, pattern } of DOC_PATTERNS) {
+    // Changed 'regex' to 'pattern'
+    const match = rawText.match(pattern);
 
-  console.log("Matched Document Number:", match ? match[0] : "No match found");
+    if (match) {
+      console.log(`Matched [${type}]:`, match[0]);
+      return match[0];
+    }
+  }
 
-  return match ? match[0] : null;
+  console.log("No document number matched any known pattern");
+  return null;
 }
 
 // Handle Extraction UI
@@ -331,7 +395,9 @@ function renderLog() {
 
   logSectionEl.appendChild(table);
 }
+
 //+++++++++++++++Stage 6 code++++++++++++++++++++
+
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbzwimRjnxJZI9uLNWvqx4gsrIzeXc4RNIeCv0sDd_V3FVcJCSTVcmAyvoDpvFPD6OwJpA/exec";
 
@@ -358,42 +424,61 @@ async function syncEntryToSheet(entry) {
 
 const realDocTestCases = [
   {
-    name: "Cash Receipt Voucher",
-    input: "5040-003024 CR 5040-CSH-RV-000032 Staff Members Sales",
-    expected: "5040-CSH-RV-000032",
+    name: "Bank Payment Voucher",
+    input: "PAYMENT PROCEED 5040-002100 BNK PV 5040-BNK-PV-000007 BANK ACC",
+    expected: "5040-BNK-PV-000007",
   },
   {
-    name: "Debit Note / AP Document",
-    input: "5040-004933 AP_DBN 5040-AP-CML-DN-00344 OTHER LOCAL SUPPLIERS",
-    expected: "5040-AP-CML-DN-00344",
+    name: "Purchase Order",
+    input: "ORDER DETAILS PO REF: 5047-PO-000091 SUPPLIER COPY",
+    expected: "5047-PO-000091",
   },
   {
-    name: "General Journal Voucher (Live OCR Scan Sample)",
-    input: "5040-004442 GV 5040-GEN-JV-000834",
-    expected: "5040-GEN-JV-000834",
+    name: "Commercial Invoice",
+    input: "BILLING REF 5040-CML-INV-000531 AMOUNT DUE EXCLUSIVE TAX",
+    expected: "5040-CML-INV-000531",
   },
   {
-    name: "OCR Character Swap Noise ('O' instead of '0')",
-    input: "5O40-GEN-JV-OOO834",
-    expected: "5040-GEN-JV-000834",
+    name: "Sales Return Tax Credit Note",
+    input: "REFUND PROCESSED 5040-SRTAXCN-000199 RETURN APPROVED",
+    expected: "5040-SRTAXCN-000199",
   },
   {
-    name: "Embedded Invoice/PO Reference Text",
-    input:
-      "CREDIT NOTE TO BE ISSUED TDN#2217 PO#5040-PO-000667 INV#5040-AP-INV-000710",
-    expected: "5040-AP-INV-000710",
+    name: "Tax Invoice",
+    input: "VAT RECEIPT 5040-TAX-INV-001963 ORIGINAL COPY",
+    expected: "5040-TAX-INV-001963",
+  },
+  {
+    name: "Goods Received Note",
+    input: "WAREHOUSE ENTRY 5040-GRN-001332 RECEIVED IN GOOD CONDITION",
+    expected: "5040-GRN-001332",
+  },
+  {
+    name: "Post-Dated Cheque Voucher",
+    input: "PDC ENTRY 5040-PDC-PV-000013 BANK PAYMENT CLEARANCE",
+    expected: "5040-PDC-PV-000013",
+  },
+  {
+    name: "Vendor Invoice (5047 Prefix)",
+    input: "SUPPLIER BILL 5047-VNDR-INV-000015 ACCOUNTS PAYABLE",
+    expected: "5047-VNDR-INV-000015",
+  },
+  {
+    name: "Fallback Secondary Reference",
+    input: "REF: 5040-004933 NO FULL TYPE MATCH",
+    expected: "5040-004933",
   },
 ];
 
 //____________________For test only------------------
 
 // let text = "";
-// text = realDocTestCases[0].input;
+// // text = realDocTestCases[0].input;
 // text = realDocTestCases[1].input;
 
 // text = realDocTestCases[2].input;
 // text = realDocTestCases[3].input;
 
-// extractDocNumber(text);
+extractDocNumber(text);
 
 //____________________y------------------
