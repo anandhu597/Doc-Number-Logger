@@ -1,3 +1,10 @@
+CSS
+
+```
+/* =========================
+   Base Styles
+========================= */
+
 body {
   font-family: system-ui, sans-serif;
   max-width: 800px;
@@ -5,6 +12,10 @@ body {
   padding: 0 1rem;
   line-height: 1.5;
 }
+
+/* =========================
+   Section Layout
+========================= */
 
 #camera-section,
 #preview-section,
@@ -15,14 +26,145 @@ body {
   margin-bottom: 1.5rem;
 }
 
+/* =========================
+   Guide Frame
+========================= */
+
 #guide-frame {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
   width: 250px;
   height: 150px;
-  border: 3px solid red;
+  transform: translate(-50%, -50%);
   box-sizing: border-box;
+  border: 3px solid #ef4444;
+  border-radius: 6px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }
+
+/* =========================
+   General Buttons
+========================= */
+
+button {
+  min-width: 44px;
+  min-height: 48px;
+  padding: 10px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background-color: #e5e7eb;
+  color: #111827;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 0.15s ease;
+}
+
+button:hover {
+  background-color: #d1d5db;
+}
+
+button:disabled {
+  background-color: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* =========================
+   Section Button Spacing
+========================= */
+
+#camera-section button,
+#preview-section button {
+  margin: 6px 6px 6px 0;
+}
+
+#log-section button {
+  margin: 6px 4px;
+}
+
+/* =========================
+   Capture Button
+========================= */
+
+#captureBtn {
+  min-height: 56px;
+  padding: 10px 18px;
+  background-color: #2563eb;
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#captureBtn:hover {
+  background-color: #1d4ed8;
+}
+
+#captureBtn:disabled {
+  background-color: #93c5fd;
+  color: #eff6ff;
+}
+
+/* =========================
+   Scan Button
+========================= */
+
+#scanBtn {
+  background-color: #16a34a;
+  color: white;
+  font-weight: 600;
+}
+
+#scanBtn:hover {
+  background-color: #15803d;
+}
+
+/* =========================
+   Confirm Log Button
+========================= */
+
+#confirm-log-btn {
+  background-color: #f59e0b;
+  color: white;
+  font-weight: 600;
+}
+
+#confirm-log-btn:hover {
+  background-color: #d97706;
+}
+
+/* =========================
+   Log Input
+========================= */
+
+#log-section input {
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+/* =========================
+   Mobile Styles
+========================= */
+
+@media (max-width: 480px) {
+  #camera-section button,
+  #preview-section button,
+  #log-section button {
+    display: block;
+    width: 100%;
+    margin: 8px 0;
+  }
+
+  #log-section input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+```
