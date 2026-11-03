@@ -1,178 +1,183 @@
 /* ============================================================
    STAGE 1: DOM REFERENCES
    ============================================================ */
-
-// Camera elements
 const videoElement = document.getElementById("video");
 const startCamBtn = document.getElementById("startCamBtn");
+const stopCamBtn = document.getElementById("stopCamBtn");
 const captureBtn = document.getElementById("captureBtn");
 const switchCamEl = document.getElementById("switchCam");
 
-// Canvas and image elements
 const canvas = document.getElementById("canvas");
 const img = document.getElementById("img");
 const processedImgEl = document.getElementById("processedImg");
 const enhanceOcrEl = document.getElementById("enhanceOcr");
 
-// Error and OCR elements
 const errorElement = document.getElementById("errorMsg");
 const scanBtn = document.getElementById("scanBtn");
 const ocrStatusEl = document.getElementById("ocrStatus");
 const ocrOutputEl = document.getElementById("ocrOutput");
 
-// Document elements
 const guideFrame = document.getElementById("guide-frame");
 const docNumberResultEl = document.getElementById("docNumberResult");
 
-// Logging elements
 const logSectionEl = document.getElementById("tableArea");
 const inputEl = document.getElementById("input");
+const noteInputEl = document.getElementById("noteInput");
 const confirmLogBtn = document.getElementById("confirm-log-btn");
+const logMsgEl = document.getElementById("logMsg");
+const retryBtn = document.getElementById("retryBtn");
+const clearLogBtn = document.getElementById("clearLogBtn");
 
 /* ============================================================
-   STAGE 2: STATE VARIABLES
+   STAGE 2: STATE
    ============================================================ */
-
 let currentStream = null;
 let currentFacingMode = "environment";
+let rawCapture = null; // the last capture before "Enhance", so the checkbox can be toggled after capturing
+let ocrWorkerPromise = null; // one OCR engine, created once and reused for every scan
+let ocrReady = false;
 
-let hasCaptured = false;
+const STORAGE_KEY = "docNumberLog.v1";
+const scanLog = loadLog(); // saved on this phone, survives refresh
 
-let imagDataArr = null;
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycby4BTDd_EeG52RhdQ-U5vzl7HDw9vkk-Qsl_f7mnfsAJcQA-l4QbAa1ElCuE-MF9ilWng/exec";
 
-// Local document log
-const scanLog = [];
+// Only these characters can appear in a document number, so OCR is told to look for nothing else
+const OCR_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-";
 
-/* ============================================================
-   STAGE 3: DEVICE DETECTION
-   ============================================================ */
+// --- doc-number parsing start ---
+// Order matters: the first pattern that matches wins.
+// (?<!\d) and (?!\d) stop extra digits on either side from sneaking into a match.
+const DOC_PATTERNS = [
+  ["Cash Receipt Voucher", "\\d{4}-CSH-RV-\\d{6}"],
+  ["Bank Receipt Voucher", "\\d{4}-BNK-RV-\\d{6}"],
+  ["Bank Payment Voucher", "\\d{4}-BNK-PV-\\d{6}"],
+  ["Post-Dated Cheque Voucher (AP PDC)", "\\d{4}-PDC-PV-\\d{6}"],
+  ["Debit Note", "\\d{4}-AP-CML-DN-\\d{5,6}"],
+  ["AP Tax Debit Note", "\\d{4}-AP-TAX-DN-\\d{5,6}"],
+  ["FT Commercial Debit Note", "\\d{4}-FT-CML-DN-\\d{5,6}"],
+  ["General Journal Voucher", "\\d{4}-GEN-JV-\\d{6}"],
+  ["AP Commercial Invoice", "\\d{4}-AP-CML-INV-\\d{5,6}"],
+  ["Invoice", "\\d{4}-AP-INV-\\d{5,6}"],
+  ["Commercial Invoice", "\\d{4}-CML-INV-\\d{5,6}"],
+  ["Tax Invoice", "\\d{4}-TAX-INV-\\d{5,6}"],
+  ["Vendor Invoice", "\\d{4}-VNDR-INV-\\d{5,6}"],
+  ["Sales Return Tax Credit Note", "\\d{4}-SRTAXCN-\\d{5,6}"],
+  ["FT Tax Credit Note", "\\d{4}-FT-TAX-CN-\\d{5,6}"],
+  ["FT Commercial Credit Note", "\\d{4}-FT-CML-CN-\\d{5,6}"],
+  ["Purchase Order", "\\d{4}-PO-\\d{5,6}"],
+  ["Goods Received Note", "\\d{4}-GRN-\\d{5,6}"],
+  ["Fallback Secondary", "\\d{4}-\\d{6}"],
+].map(([type, body]) => ({ type, pattern: new RegExp(`(?<!\\d)${body}(?!\\d)`, "i") }));
 
-//------just to check
+// Letters OCR often reads in place of digits, and the other way round
+const TO_DIGIT = { O: "0", Q: "0", D: "0", I: "1", L: "1", "|": "1", Z: "2", S: "5", B: "8", G: "6" };
+const TO_LETTER = { 0: "O", 1: "I", 2: "Z", 5: "S", 8: "B", 6: "G" };
 
-const userAgent = navigator.userAgent;
+// Returns { number, typeName, prefix } or null.
+// prefix = number without the trailing serial, e.g. "5040-BNK-PV"
+function extractDocNumber(rawText) {
+  if (!rawText) return null;
+  const text = rawText.toUpperCase().replace(/[–—]/g, "-").replace(/\s*-\s*/g, "-");
 
-const isMobileDevice =
-  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    userAgent,
-  );
-
-if (isMobileDevice) {
-  console.log("Mobile or Tablet device");
-} else {
-  console.log("Laptop or Desktop");
+  // Try the text as read first; only if that fails, try again with look-alike characters fixed
+  return matchPatterns(text) || matchPatterns(fixLookalikes(text));
 }
 
+function matchPatterns(text) {
+  for (const { type, pattern } of DOC_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        number: match[0],
+        typeName: type,
+        prefix: match[0].replace(/-\d{5,6}$/, ""),
+      };
+    }
+  }
+  return null;
+}
+
+// In each dashed chunk like "5O4O-P0-12S45": the first 4 characters and the
+// last (up to 6) characters should be digits, the parts in between should be letters.
+function fixLookalikes(text) {
+  const swap = (s, map) => s.replace(/./g, (ch) => map[ch] ?? ch);
+
+  return text.replace(/[A-Z0-9|]+(?:-[A-Z0-9|]+)+/g, (chunk) => {
+    const parts = chunk.split("-");
+    const last = parts.length - 1;
+    return parts
+      .map((p, i) => {
+        if (i === 0) return p.slice(0, -4) + swap(p.slice(-4), TO_DIGIT);
+        if (i === last) return swap(p.slice(0, 6), TO_DIGIT) + p.slice(6);
+        return swap(p, TO_LETTER);
+      })
+      .join("-");
+  });
+}
+// --- doc-number parsing end ---
+
 /* ============================================================
-   STAGE 4: EVENT LISTENERS
+   STAGE 3: EVENT LISTENERS
    ============================================================ */
-
-// Start Camera
-
 startCamBtn.addEventListener("click", startCamera);
-
-// Video Metadata
+stopCamBtn.addEventListener("click", stopCamera);
 
 videoElement.addEventListener("loadedmetadata", () => {
-  console.log("Video width:", videoElement.videoWidth);
-  console.log("Video height:", videoElement.videoHeight);
-
-  canvas.width = videoElement.videoWidth;
-  canvas.height = videoElement.videoHeight;
-
-  // Enable the capture button once dimensions are ready
   captureBtn.disabled = false;
 });
 
-// Capture Button
-
 captureBtn.addEventListener("click", () => {
-  console.log("capture Clicked");
+  if (!currentStream || !videoElement.videoWidth) return;
 
-  // 1. Calculate crop region from guide frame position
-  const guideRect = guideFrame.getBoundingClientRect();
-  const videoRect = videoElement.getBoundingClientRect();
+  const crop = getGuideCrop();
+  const scale = crop.w < 1000 ? 2 : 1; // small crops read better when enlarged
 
-  const relativeX = guideRect.left - videoRect.left;
-  const relativeY = guideRect.top - videoRect.top;
+  canvas.width = Math.round(crop.w * scale);
+  canvas.height = Math.round(crop.h * scale);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.imageSmoothingQuality = "high";
+  context.drawImage(videoElement, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height);
 
-  const scaleX = videoElement.videoWidth / videoRect.width;
-  const scaleY = videoElement.videoHeight / videoRect.height;
+  rawCapture = context.getImageData(0, 0, canvas.width, canvas.height);
+  img.src = canvas.toDataURL("image/png");
+  img.hidden = false;
 
-  const sourceX = relativeX * scaleX;
-  const sourceY = relativeY * scaleY;
-  const sourceWidth = guideRect.width * scaleX;
-  const sourceHeight = guideRect.height * scaleY;
+  applyEnhanceSetting();
 
-  // 2. Resize canvas to match the CROPPED region, not the full video
-  canvas.width = sourceWidth;
-  canvas.height = sourceHeight;
-
-  const context = canvas.getContext("2d");
-
-  // 3. Draw ONLY the cropped source region onto the canvas
-  context.drawImage(
-    videoElement,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight, // source: crop area
-    0,
-    0,
-    canvas.width,
-    canvas.height, // destination: fills canvas
-  );
-
-  const imagData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const imageUrl = canvas.toDataURL("image/png");
-
-  imagDataArr = imagData.data;
-
-  if (enhanceOcrEl.checked) {
-    applyGrayScale(imagDataArr, context, imagData);
-    processedImgEl.src = canvas.toDataURL("image/png");
-  }
-
-  img.src = imageUrl;
-  hasCaptured = true;
   scanBtn.disabled = false;
+  ocrStatusEl.textContent = "Image captured. Press Scan Document.";
 });
 
-// Switch Camera
+enhanceOcrEl.addEventListener("change", applyEnhanceSetting);
 
 switchCamEl.addEventListener("click", async () => {
-  console.log(currentFacingMode);
-
-  currentFacingMode =
-    currentFacingMode === "environment" ? "user" : "environment";
-
+  currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
   await startCamera();
 });
 
-// Scan Button / OCR
-
 scanBtn.addEventListener("click", async () => {
-  ocrStatusEl.textContent = "Loading OCR engine…";
   scanBtn.disabled = true;
+  ocrStatusEl.textContent = ocrReady ? "Reading…" : "Loading OCR engine…";
 
   try {
-    const result = await Tesseract.recognize(canvas, "eng");
+    const worker = await getOcrWorker();
+    ocrStatusEl.textContent = "Reading…";
+    const { data } = await worker.recognize(canvas);
+    ocrOutputEl.textContent = data.text;
 
-    const text = result.data.text;
-
-    ocrOutputEl.textContent = text;
-    ocrStatusEl.textContent = "Done!";
-
-    // Step 3 & 4: Run pure extraction function and handle UI explicitly[cite: 1]
-    const extractedNumber = extractDocNumber(text);
-    handleExtractionUI(extractedNumber);
-
-    if (extractedNumber) {
-      docNumberResultEl.style.color = "green";
-      docNumberResultEl.textContent = extractedNumber; // Success
+    const found = extractDocNumber(data.text);
+    if (found) {
+      inputEl.value = found.number;
+      docNumberResultEl.className = "result-ok";
+      docNumberResultEl.textContent = found.number;
+      ocrStatusEl.textContent = "Done!";
     } else {
-      docNumberResultEl.style.color = "red";
-      docNumberResultEl.textContent =
-        "No document number detected — please retry"; // Explicit fail state[cite: 1, 2]
+      // Leave whatever is in the number box alone
+      docNumberResultEl.className = "result-bad";
+      docNumberResultEl.textContent = "No document number detected — please retry";
+      ocrStatusEl.textContent = "Done, but no number found.";
     }
   } catch (error) {
     console.error("OCR error:", error);
@@ -182,303 +187,310 @@ scanBtn.addEventListener("click", async () => {
   }
 });
 
-// Confirm Log Button
+confirmLogBtn.addEventListener("click", logCurrent);
 
-confirmLogBtn.addEventListener("click", () => {
-  console.log("loging confirmed");
+// Press Enter / Done in the number box to log quickly
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    logCurrent();
+  }
+});
 
-  const finalValue = inputEl.value.trim();
+retryBtn.addEventListener("click", async () => {
+  const failed = scanLog.filter((e) => e.sync === "failed");
+  if (!failed.length) return;
 
-  if (!finalValue) return;
+  retryBtn.disabled = true;
+  showLogMsg(`Resending ${failed.length}…`, false);
 
-  console.log(finalValue);
-  const entry = { docNumber: finalValue, timestamp: new Date().toISOString() };
-  scanLog.push(entry);
+  let stillFailed = 0;
+  for (const entry of failed) {
+    // One at a time so rows land in the sheet in order
+    if (!(await sendEntry(entry))) stillFailed++;
+  }
+
+  retryBtn.disabled = false;
+  if (stillFailed) showLogMsg(`${stillFailed} still not sent. Check your connection and try again.`, true);
+  else showLogMsg("All sent to the sheet.", false);
+});
+
+clearLogBtn.addEventListener("click", () => {
+  if (!scanLog.length) return;
+  const unsent = scanLog.filter((e) => e.sync !== "ok").length;
+  const question = unsent
+    ? `Clear the log on this phone? ${unsent} entr${unsent === 1 ? "y has" : "ies have"} NOT reached the sheet and will be lost.`
+    : "Clear the log on this phone? (Your Google Sheet is not touched.)";
+  if (!confirm(question)) return;
+
+  scanLog.length = 0;
+  saveLog();
   renderLog();
-
-  syncEntryToSheet(entry); // ← add this
+  showLogMsg("Log cleared.", false);
 });
 
 /* ============================================================
-   STAGE 5: HELPER FUNCTIONS
+   STAGE 4: HELPERS
    ============================================================ */
-
-// Start Camera
-
 async function startCamera() {
   try {
-    // 1. If a stream is already active, stop it before opening a new one
-    if (currentStream) {
-      currentStream.getTracks().forEach((track) => track.stop());
-    }
+    if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
 
-    // 2. Await the stream directly (no .then needed)
     currentStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: currentFacingMode },
       audio: false,
     });
-
-    // 3. Attach the stream to the video element
     videoElement.srcObject = currentStream;
-    errorElement.textContent = ""; // Clear old errors if successful
+    errorElement.textContent = "";
+    startCamBtn.disabled = true;
+    stopCamBtn.disabled = false;
+    switchCamEl.disabled = false;
   } catch (error) {
     console.error("Camera access error:", error);
     errorElement.textContent = `Camera access error: ${error.message}`;
   }
 }
 
-// Apply Grayscale
-
-function applyGrayScale(data, context, imageData) {
-  // 2. Loop through every pixel (step size of 4)
-  for (let i = 0; i < data.length; i += 4) {
-    const red = data[i];
-    const green = data[i + 1];
-    const blue = data[i + 2];
-
-    // 3. Grayscale calculation (Luminance formula)
-    const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
-
-    // 4. Thresholding (Binarization cutoff)
-    const threshold = 128;
-    const value = gray > threshold ? 255 : 0; // Pure White (255) or Pure Black (0)
-
-    // 5. Overwrite the RGB channels with the binary value
-    data[i] = value; // Red
-    data[i + 1] = value; // Green
-    data[i + 2] = value; // Blue
-
-    // data[i + 3] remains untouched (Alpha / Opacity)
-  }
-
-  // 6. Write modified array back to the canvas
-  context.putImageData(imageData, 0, 0);
+function stopCamera() {
+  if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
+  currentStream = null;
+  videoElement.srcObject = null;
+  startCamBtn.disabled = false;
+  stopCamBtn.disabled = true;
+  captureBtn.disabled = true;
+  switchCamEl.disabled = true;
 }
 
-// Extract Document Number
-const DOC_PATTERNS = [
-  // 1. Cash Receipt Voucher
-  { type: "Cash Receipt Voucher", pattern: /\d{4}-CSH-RV-\d{6}/i },
+// Where the red guide frame sits on the real camera image (kept inside the image)
+function getGuideCrop() {
+  const g = guideFrame.getBoundingClientRect();
+  const v = videoElement.getBoundingClientRect();
+  const scaleX = videoElement.videoWidth / v.width;
+  const scaleY = videoElement.videoHeight / v.height;
 
-  // 2. Bank Receipt Voucher
-  { type: "Bank Receipt Voucher", pattern: /\d{4}-BNK-RV-\d{6}/i },
+  const x = Math.max(0, (g.left - v.left) * scaleX);
+  const y = Math.max(0, (g.top - v.top) * scaleY);
+  const w = Math.min(videoElement.videoWidth - x, g.width * scaleX);
+  const h = Math.min(videoElement.videoHeight - y, g.height * scaleY);
+  return { x, y, w, h };
+}
 
-  // 3. Bank Payment Voucher
-  { type: "Bank Payment Voucher", pattern: /\d{4}-BNK-PV-\d{6}/i },
+// Draws either the plain capture or the black-and-white version onto the canvas (OCR reads the canvas)
+function applyEnhanceSetting() {
+  if (!rawCapture) return;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
 
-  // 4. Post-Dated Cheque Voucher (AP PDC)
-  {
-    type: "Post-Dated Cheque Voucher (AP PDC)",
-    pattern: /\d{4}-PDC-PV-\d{6}/i,
-  },
+  if (enhanceOcrEl.checked) {
+    const copy = new ImageData(new Uint8ClampedArray(rawCapture.data), rawCapture.width, rawCapture.height);
+    toBlackAndWhite(copy.data);
+    context.putImageData(copy, 0, 0);
+    processedImgEl.src = canvas.toDataURL("image/png");
+    processedImgEl.hidden = false;
+  } else {
+    context.putImageData(rawCapture, 0, 0);
+    processedImgEl.removeAttribute("src");
+    processedImgEl.hidden = true;
+  }
+}
 
-  // 5. Debit Note
-  { type: "Debit Note", pattern: /\d{4}-AP-CML-DN-\d{5,6}/i },
+// Grayscale, then pick the black/white cut-off from the image itself (Otsu's method),
+// so it still works in dim or very bright light instead of a fixed 128.
+function toBlackAndWhite(data) {
+  const histogram = new Array(256).fill(0);
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    data[i] = gray;
+    histogram[gray]++;
+  }
 
-  // 6. AP Tax Debit Note
-  { type: "AP Tax Debit Note", pattern: /\d{4}-AP-TAX-DN-\d{5,6}/i },
+  const total = data.length / 4;
+  let sumAll = 0;
+  for (let t = 0; t < 256; t++) sumAll += t * histogram[t];
 
-  // 7. FT Commercial Debit Note
-  { type: "FT Commercial Debit Note", pattern: /\d{4}-FT-CML-DN-\d{5,6}/i },
-
-  // 8. General Journal Voucher
-  { type: "General Journal Voucher", pattern: /\d{4}-GEN-JV-\d{6}/i },
-
-  // 9. Invoice
-  { type: "Invoice", pattern: /\d{4}-AP-INV-\d{5,6}/i },
-
-  // 10. Commercial Invoice
-  { type: "Commercial Invoice", pattern: /\d{4}-CML-INV-\d{5,6}/i },
-
-  // 11. Tax Invoice
-  { type: "Tax Invoice", pattern: /\d{4}-TAX-INV-\d{5,6}/i },
-
-  // 12. Vendor Invoice
-  { type: "Vendor Invoice", pattern: /\d{4}-VNDR-INV-\d{5,6}/i },
-
-  // 13. Sales Return Tax Credit Note
-  { type: "Sales Return Tax Credit Note", pattern: /\d{4}-SRTAXCN-\d{5,6}/i },
-
-  // 14. FT Tax Credit Note
-  { type: "FT Tax Credit Note", pattern: /\d{4}-FT-TAX-CN-\d{5,6}/i },
-
-  // 15. FT Commercial Credit Note
-  { type: "FT Commercial Credit Note", pattern: /\d{4}-FT-CML-CN-\d{5,6}/i },
-
-  // 16. Purchase Order
-  { type: "Purchase Order", pattern: /\d{4}-PO-\d{5,6}/i },
-
-  // 17. Goods Received Note
-  { type: "Goods Received Note", pattern: /\d{4}-GRN-\d{5,6}/i },
-
-  // 18. Fallback Secondary (Short Numeric ID)
-  { type: "Fallback Secondary", pattern: /\d{4}-\d{6}/i },
-];
-
-function extractDocNumber(rawText) {
-  if (!rawText) return null;
-
-  for (const { type, pattern } of DOC_PATTERNS) {
-    // Changed 'regex' to 'pattern'
-    const match = rawText.match(pattern);
-
-    if (match) {
-      console.log(`Matched [${type}]:`, match[0]);
-      return match[0];
+  let sumBack = 0, weightBack = 0, best = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    weightBack += histogram[t];
+    if (!weightBack) continue;
+    const weightFore = total - weightBack;
+    if (!weightFore) break;
+    sumBack += t * histogram[t];
+    const meanBack = sumBack / weightBack;
+    const meanFore = (sumAll - sumBack) / weightFore;
+    const between = weightBack * weightFore * (meanBack - meanFore) ** 2;
+    if (between > best) {
+      best = between;
+      threshold = t;
     }
   }
 
-  console.log("No document number matched any known pattern");
-  return null;
-}
-
-// Handle Extraction UI
-
-function handleExtractionUI(extractedNumber) {
-  console.log(extractedNumber); // Logs: "5040-GEN-JV-000834"
-
-  if (extractedNumber) {
-    // 1. Put the extracted string directly inside the input
-    inputEl.value = extractedNumber;
-  } else {
-    // 2. Clear input or handle empty case explicitly
-    inputEl.value = "";
+  for (let i = 0; i < data.length; i += 4) {
+    const value = data[i] > threshold ? 255 : 0;
+    data[i] = data[i + 1] = data[i + 2] = value;
   }
 }
 
-// Step 3: Write the renderLog() function to display the array in a table
+// Creates the OCR engine once. If it fails (e.g. no internet), the next scan tries again.
+function getOcrWorker() {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      const worker = await Tesseract.createWorker("eng");
+      await worker.setParameters({ tessedit_char_whitelist: OCR_CHARS });
+      ocrReady = true;
+      return worker;
+    })().catch((err) => {
+      ocrWorkerPromise = null;
+      throw err;
+    });
+  }
+  return ocrWorkerPromise;
+}
+
+function logCurrent() {
+  const raw = inputEl.value.trim();
+  if (!raw) return showLogMsg("Enter or scan a document number first.", true);
+
+  // Re-check so typed corrections get the right type
+  const found = extractDocNumber(raw);
+  const docNumber = found ? found.number : raw.toUpperCase();
+
+  // Duplicate check against everything saved on this phone
+  if (scanLog.some((e) => e.docNumber === docNumber)) {
+    return showLogMsg(`${docNumber} is already logged.`, true);
+  }
+
+  const entry = {
+    timestamp: formatStamp(new Date()),
+    docType: found ? found.prefix : "Unknown",
+    docTypeName: found ? found.typeName : "Unknown",
+    docNumber,
+    note: noteInputEl.value.trim(),
+    sync: "pending",
+  };
+
+  scanLog.push(entry);
+  saveLog();
+  renderLog();
+
+  // Number and note stay in their boxes, so the next one is quick to type
+  inputEl.value = docNumber;
+  docNumberResultEl.className = "";
+  docNumberResultEl.textContent = "Waiting for scan…";
+  showLogMsg(`Logged ${docNumber}.`, false);
+
+  // Send in the background: the sheet never blocks the screen
+  sendEntry(entry).then((ok) => {
+    if (!ok) showLogMsg(`${docNumber} is saved on this phone, but didn't reach the sheet. Tap "Resend failed" later.`, true);
+  });
+}
+
+async function sendEntry(entry) {
+  entry.sync = "pending";
+  renderLog();
+  const ok = await syncEntryToSheet(entry);
+  entry.sync = ok ? "ok" : "failed";
+  saveLog();
+  renderLog();
+  return ok;
+}
+
+// Resolves true only if the script says the row was written
+async function syncEntryToSheet(entry) {
+  const { timestamp, docType, docNumber, note } = entry;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ timestamp, docType, docNumber, note }),
+    });
+    if (!res.ok) return false;
+    const reply = await res.json();
+    return reply.status === "ok";
+  } catch (err) {
+    console.error("Sync failed:", err);
+    return false;
+  }
+}
+
+// "2026-10-26 13:00" (local time)
+function formatStamp(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function showLogMsg(text, isError) {
+  logMsgEl.textContent = text;
+  logMsgEl.className = isError ? "msg-error" : "msg-ok";
+}
+
+const SYNC_LABEL = {
+  ok: ["✓", "Sent to sheet", "sync-ok"],
+  failed: ["✗", "Not sent — tap Resend failed", "sync-failed"],
+  pending: ["…", "Sending", "sync-pending"],
+};
 
 function renderLog() {
-  logSectionEl.innerHTML = ""; // clear previous render first
+  const failedCount = scanLog.filter((e) => e.sync === "failed").length;
+  retryBtn.hidden = failedCount === 0;
+  retryBtn.textContent = `Resend failed (${failedCount})`;
+  clearLogBtn.hidden = scanLog.length === 0;
 
+  logSectionEl.innerHTML = "";
   if (scanLog.length === 0) {
-    const emptyMsg = document.createElement("p");
-    emptyMsg.textContent = "No documents logged yet.";
-    logSectionEl.appendChild(emptyMsg);
+    logSectionEl.innerHTML = "<p>No documents logged yet.</p>";
     return;
   }
 
-  // Create table element
   const table = document.createElement("table");
-
-  table.border = "1";
-  table.style.marginTop = "10px";
-  table.style.borderCollapse = "collapse";
-
-  // Build table header
-  table.innerHTML = `
-    <thead>
-      <tr style="background-color: #f2f2f2;">
-        <th style="padding: 8px;">#</th>
-        <th style="padding: 8px;">Doc Number</th>
-        <th style="padding: 8px;">Timestamp</th>
-      </tr>
-    </thead>
-    <tbody>
-    </tbody>
-  `;
-
-  const tbody = table.querySelector("tbody");
-
-  // Populate rows
-  scanLog.forEach((entry, index) => {
-    const row = document.createElement("tr");
-
-    row.innerHTML = `
-      <td style="padding: 8px; text-align: center;">${index + 1}</td>
-      <td style="padding: 8px;">${entry.docNumber}</td>
-      <td style="padding: 8px;">${new Date(entry.timestamp).toLocaleTimeString()}</td>
-    `;
-
-    tbody.appendChild(row);
+  const head = table.createTHead().insertRow();
+  ["#", "Date & time", "Doc type", "Doc number", "Note", "Sheet"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
   });
 
+  // Newest on top
+  const tbody = table.createTBody();
+  for (let i = scanLog.length - 1; i >= 0; i--) {
+    const e = scanLog[i];
+    const row = tbody.insertRow();
+    row.insertCell().textContent = i + 1;
+    row.insertCell().textContent = e.timestamp;
+    const typeCell = row.insertCell();
+    typeCell.textContent = e.docType;
+    typeCell.title = e.docTypeName;
+    row.insertCell().textContent = e.docNumber;
+    row.insertCell().textContent = e.note;
+
+    const [mark, title, cls] = SYNC_LABEL[e.sync] || SYNC_LABEL.failed;
+    const syncCell = row.insertCell();
+    syncCell.textContent = mark;
+    syncCell.title = title;
+    syncCell.className = cls;
+  }
   logSectionEl.appendChild(table);
 }
 
-//+++++++++++++++Stage 6 code++++++++++++++++++++
-
-const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbzwimRjnxJZI9uLNWvqx4gsrIzeXc4RNIeCv0sDd_V3FVcJCSTVcmAyvoDpvFPD6OwJpA/exec";
-
-async function syncEntryToSheet(entry) {
+function loadLog() {
   try {
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify(entry),
-    });
-    console.log("Sync response received");
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+    // Anything still "sending" when the page was closed is treated as not sent
+    return saved.map((e) => (e.sync === "pending" ? { ...e, sync: "failed" } : e));
+  } catch {
+    return [];
+  }
+}
+
+function saveLog() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(scanLog));
   } catch (err) {
-    console.error("Sync failed:", err);
+    console.warn("Could not save log on this phone:", err);
   }
 }
 
 /* ============================================================
-   TEST AREA
+   STAGE 5: START
    ============================================================ */
-
-//----------------------Test Area---------------------------
-
-// Your original test cases remain exactly the same.
-
-const realDocTestCases = [
-  {
-    name: "Bank Payment Voucher",
-    input: "PAYMENT PROCEED 5040-002100 BNK PV 5040-BNK-PV-000007 BANK ACC",
-    expected: "5040-BNK-PV-000007",
-  },
-  {
-    name: "Purchase Order",
-    input: "ORDER DETAILS PO REF: 5047-PO-000091 SUPPLIER COPY",
-    expected: "5047-PO-000091",
-  },
-  {
-    name: "Commercial Invoice",
-    input: "BILLING REF 5040-CML-INV-000531 AMOUNT DUE EXCLUSIVE TAX",
-    expected: "5040-CML-INV-000531",
-  },
-  {
-    name: "Sales Return Tax Credit Note",
-    input: "REFUND PROCESSED 5040-SRTAXCN-000199 RETURN APPROVED",
-    expected: "5040-SRTAXCN-000199",
-  },
-  {
-    name: "Tax Invoice",
-    input: "VAT RECEIPT 5040-TAX-INV-001963 ORIGINAL COPY",
-    expected: "5040-TAX-INV-001963",
-  },
-  {
-    name: "Goods Received Note",
-    input: "WAREHOUSE ENTRY 5040-GRN-001332 RECEIVED IN GOOD CONDITION",
-    expected: "5040-GRN-001332",
-  },
-  {
-    name: "Post-Dated Cheque Voucher",
-    input: "PDC ENTRY 5040-PDC-PV-000013 BANK PAYMENT CLEARANCE",
-    expected: "5040-PDC-PV-000013",
-  },
-  {
-    name: "Vendor Invoice (5047 Prefix)",
-    input: "SUPPLIER BILL 5047-VNDR-INV-000015 ACCOUNTS PAYABLE",
-    expected: "5047-VNDR-INV-000015",
-  },
-  {
-    name: "Fallback Secondary Reference",
-    input: "REF: 5040-004933 NO FULL TYPE MATCH",
-    expected: "5040-004933",
-  },
-];
-
-//____________________For test only------------------
-
-// let text = "";
-// // text = realDocTestCases[0].input;
-// text = realDocTestCases[1].input;
-
-// text = realDocTestCases[2].input;
-// text = realDocTestCases[3].input;
-
-// extractDocNumber(text);
-
-//____________________y------------------
+renderLog();
+getOcrWorker().catch(() => {}); // start loading OCR in the background so the first scan is faster
